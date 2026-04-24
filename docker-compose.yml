@@ -1,0 +1,17 @@
+services:
+  task-db:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${DB_PORT:-3334}:3334"
+    volumes:
+      # SQLite 資料目錄掛到本機，確保 container 重建後資料不遺失
+      - ./data:/app/data
+    environment:
+      DB_PORT: "3334"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3334/tasks"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
