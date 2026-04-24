@@ -66,7 +66,7 @@ curl http://localhost:3334/tasks
 # 查看即時 log
 docker compose logs -f task-db
 
-# 暫停（保留 container 狀態，可用 docker compose start 恢復）
+# 暫停（可用 docker compose start 恢復）
 docker compose stop
 
 # 停止並移除 container（./data/ 資料不受影響）
@@ -80,15 +80,13 @@ docker compose up -d --build
 
 ## Part 2：將 MCP Server 加入專案
 
-每個需要 task 功能的專案都要執行這個部分。MCP Server 以 git submodule 方式加入，透過 `.env` 連線到共用的 DB Server。
+MCP Server 使用 stdio 模式，Claude Code 會在需要時自動 spawn process，**不需要手動啟動或管理 server**。透過 `.mcp.json` 的 `env` 欄位傳入 DB Server 位置。
 
 ### 前置確認
 
 請先向用戶確認：
 - 目標專案的根目錄路徑
 - DB Server 的連線位置（Part 1 記下的，或由用戶提供）
-- MCP Server 要使用哪個 port？（預設 3333，同一台機器上多個專案需各用不同 port）
-- 是否需要設定 API Key？
 
 ### 步驟
 
@@ -100,80 +98,39 @@ docker compose up -d --build
 git submodule add <repo-url> mcp-server/task-management
 ```
 
-**2. 建立 .env 設定檔**
+**2. 安裝依賴並編譯**
 
 ```bash
 cd mcp-server/task-management
-cp .env.example .env
-```
-
-編輯 `mcp-server/task-management/.env`，填入實際值：
-
-```env
-PORT=3333
-API_KEY=
-DB_SERVER_URL=http://<db-server-ip>:3334
-```
-
-- `API_KEY` 留空表示不驗證；若設定，`.mcp.json` 的 URL 需帶上 `?key=<value>`
-- `DB_SERVER_URL` 填入 Part 1 記下的 DB Server 位置
-
-**3. 安裝依賴並編譯**
-
-```bash
 npm install
 npm run build
 ```
 
-**4. 啟動 MCP Server**
+確認 `dist/mcp-server/index.js` 存在。
 
-前景執行（測試用）：
-```bash
-npm run start:mcp
-```
-
-背景常駐（正式使用）：
-```bash
-npx pm2 start dist/mcp-server/index.js --name task-mcp
-npx pm2 save
-```
-
-啟動後應看到：
-```
-MCP Server running on http://0.0.0.0:3333
-SSE endpoint: http://0.0.0.0:3333/sse
-DB Server URL: http://<db-server-ip>:3334
-```
-
-**5. 設定 .mcp.json**
+**3. 設定 .mcp.json**
 
 回到**目標專案根目錄**，建立或編輯 `.mcp.json`：
 
-無 API Key：
 ```json
 {
   "mcpServers": {
     "task-management": {
-      "url": "http://localhost:3333/sse"
+      "command": "node",
+      "args": ["./mcp-server/task-management/dist/mcp-server/index.js"],
+      "env": {
+        "DB_SERVER_URL": "http://<db-server-ip>:3334"
+      }
     }
   }
 }
 ```
 
-有 API Key：
-```json
-{
-  "mcpServers": {
-    "task-management": {
-      "url": "http://localhost:3333/sse?key=<your-api-key>"
-    }
-  }
-}
-```
+將 `<db-server-ip>` 替換為 Part 1 記下的 DB Server 位置。若 DB Server 在本機則填 `localhost`。
 
-**6. 重啟 Claude Code（或其他 MCP client）**
+**4. 重啟 Claude Code（或其他 MCP client）**
 
-**7. 驗證連線**
+**5. 驗證連線**
 
 請用戶在 Claude Code 執行：
 
@@ -189,10 +146,9 @@ DB Server URL: http://<db-server-ip>:3334
 
 | 問題 | 可能原因 | 解法 |
 |------|----------|------|
-| `/mcp` 顯示 disconnected | MCP Server 未啟動或 URL 錯誤 | 確認 server 運行中，檢查 `.mcp.json` 的 URL |
+| `/mcp` 顯示 disconnected | `dist/` 不存在或路徑錯誤 | 確認已執行 `npm run build`，檢查 `.mcp.json` 的 `args` 路徑 |
 | `DB Server error 404` | DB Server 未啟動 | 先完成 Part 1，確認 container 狀態為 `Up` |
-| `fetch failed` | `DB_SERVER_URL` 無法連線 | 確認 `.env` 中的 IP / port，檢查防火牆是否開放 3334 port |
-| `Unauthorized` | API Key 不符 | 確認 `.mcp.json` 的 URL 帶上正確的 `?key=` |
+| `fetch failed` | `DB_SERVER_URL` 無法連線 | 確認 `.mcp.json` 的 `env.DB_SERVER_URL`，檢查防火牆是否開放 3334 port |
 | 編譯錯誤 | Node.js 版本過舊 | 升級至 Node.js 18+ |
 | submodule 目錄是空的 | clone 後未初始化 | 執行 `git submodule update --init` |
 | container health 一直 `starting` | 初始化中或有錯誤 | 執行 `docker compose logs task-db` 查看原因 |

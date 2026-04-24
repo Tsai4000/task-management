@@ -5,9 +5,8 @@
   "scripts": {
     "build": "tsc",
     "start:db": "node dist/db-server/index.js",
-    "start:mcp": "node dist/mcp-server/index.js",
     "dev:db": "tsx watch src/db-server/index.ts",
-    "dev:mcp": "tsx watch src/mcp-server/index.ts"
+    "dev:mcp": "tsx src/mcp-server/index.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.0",
