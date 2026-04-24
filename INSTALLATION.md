@@ -6,7 +6,7 @@
 
 ## Part 1：安裝 DB Server（Docker Compose）
 
-DB Server 是所有人共用的資料庫服務，通常只需部署一次。SQLite 資料透過 bind mount 持久化到本機 `./data/`，container 重建後資料不遺失。
+DB Server 是所有人共用的資料庫服務，通常只需部署一次。SQLite 資料透過 bind mount 持久化到本機 `./data/`，container 重建後資料不遺失。DB Server 同時提供 REST API 與 Web UI。
 
 ### 前置確認
 
@@ -58,7 +58,11 @@ docker compose ps
 curl http://localhost:3334/tasks
 ```
 
-應回傳 `[]`（空陣列）。記下 DB Server 的對外位置（例如 `http://192.168.1.100:3334`），Part 2 會用到。
+應回傳 `{"tasks":[],"total":0}`。記下 DB Server 的對外位置（例如 `http://192.168.1.100:3334`），Part 2 會用到。
+
+**6. 確認 Web UI 可用**
+
+用瀏覽器開啟 `http://localhost:3334`，應可看到 Task Management 介面。
 
 ### 常用維運指令
 
@@ -136,9 +140,12 @@ npm run build
 
 1. 執行 `/mcp`，確認 `task-management` 狀態為 **connected**
 2. 呼叫 `task_create`，title 填 `"安裝測試"` → 預期回傳含 `"id": "TASK-001"` 的 JSON
-3. 呼叫 `task_list` → 確認看到剛建立的任務
+3. 呼叫 `task_list` → 確認看到剛建立的任務（回傳格式含 `total` 欄位）
 4. 呼叫 `task_update`，將 TASK-001 的 status 改為 `in_progress`
 5. 呼叫 `task_get`，確認 status 已更新
+6. 呼叫 `task_archive`，task_id 填 `"TASK-001"` → 確認回傳已封存訊息
+7. 呼叫 `task_list` → 確認 TASK-001 不出現（封存後預設隱藏）
+8. 呼叫 `task_list`，加上 `show_archived: true` → 確認 TASK-001 重新出現
 
 ---
 
@@ -149,6 +156,7 @@ npm run build
 | `/mcp` 顯示 disconnected | `dist/` 不存在或路徑錯誤 | 確認已執行 `npm run build`，檢查 `.mcp.json` 的 `args` 路徑 |
 | `DB Server error 404` | DB Server 未啟動 | 先完成 Part 1，確認 container 狀態為 `Up` |
 | `fetch failed` | `DB_SERVER_URL` 無法連線 | 確認 `.mcp.json` 的 `env.DB_SERVER_URL`，檢查防火牆是否開放 3334 port |
+| Web UI 開啟空白或 404 | `public/` 目錄不在 image 內 | 重建 image：`docker compose up -d --build` |
 | 編譯錯誤 | Node.js 版本過舊 | 升級至 Node.js 18+ |
 | submodule 目錄是空的 | clone 後未初始化 | 執行 `git submodule update --init` |
 | container health 一直 `starting` | 初始化中或有錯誤 | 執行 `docker compose logs task-db` 查看原因 |

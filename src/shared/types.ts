@@ -23,6 +23,7 @@ export interface Task {
   created_at: string;
   started_at: string;
   completed_at: string;
+  archived?: boolean;
 }
 
 export interface StatusLogEntry {
@@ -30,9 +31,15 @@ export interface StatusLogEntry {
   message: string;
 }
 
-export type TaskRow = Omit<Task, 'depends_on' | 'skills' | 'relevant_specs' | 'status_log'> & {
+export type TaskRow = Omit<Task, 'depends_on' | 'skills' | 'relevant_specs' | 'status_log' | 'archived'> & {
   depends_on: string;
   skills: string;
   relevant_specs: string;
   status_log: string;
+  archived: number;
 };
+
+export interface ListResult {
+  tasks: Task[];
+  total: number;
+}

@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync } from 'fs';
-import type { Task, TaskRow } from '../shared/types.js';
+import type { Task, TaskRow, ListResult } from '../shared/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = join(__dirname, '../../data');
@@ -31,9 +31,17 @@ db.exec(`
     status_log       TEXT DEFAULT '[]',
     created_at       TEXT NOT NULL,
     started_at       TEXT DEFAULT '',
-    completed_at     TEXT DEFAULT ''
+    completed_at     TEXT DEFAULT '',
+    archived         INTEGER DEFAULT 0
   );
 `);
+
+// 為既有資料庫補上 archived 欄位（若尚未存在）
+try {
+  db.exec(`ALTER TABLE tasks ADD COLUMN archived INTEGER DEFAULT 0`);
+} catch {
+  // 欄位已存在，忽略
+}
 
 function deserialize(row: TaskRow): Task {
   return {
@@ -42,6 +50,7 @@ function deserialize(row: TaskRow): Task {
     skills: JSON.parse(row.skills),
     relevant_specs: JSON.parse(row.relevant_specs),
     status_log: JSON.parse(row.status_log),
+    archived: row.archived === 1,
   };
 }
 
@@ -51,24 +60,52 @@ export function dbGetTask(id: string): Task | undefined {
 }
 
 export function dbListTasks(
-  filters: { status?: string; priority?: string; assigned_to?: string } = {}
-): Task[] {
-  let query = 'SELECT * FROM tasks WHERE 1=1';
-  const params: string[] = [];
-  if (filters.status)      { query += ' AND status = ?';      params.push(filters.status); }
-  if (filters.priority)    { query += ' AND priority = ?';    params.push(filters.priority); }
-  if (filters.assigned_to) { query += ' AND assigned_to = ?'; params.push(filters.assigned_to); }
-  query += ' ORDER BY created_at DESC';
-  const rows = db.prepare(query).all(...params) as TaskRow[];
-  return rows.map(deserialize);
+  filters: {
+    status?: string;
+    priority?: string;
+    assigned_to?: string;
+    show_archived?: boolean;
+    search?: string;
+    page?: number;
+    page_size?: number;
+  } = {}
+): ListResult {
+  const { status, priority, assigned_to, show_archived, search } = filters;
+  const page = filters.page ?? 1;
+  const page_size = filters.page_size ?? 20;
+
+  let where = 'WHERE 1=1';
+  const params: (string | number)[] = [];
+
+  if (!show_archived) {
+    where += ' AND (archived = 0 OR archived IS NULL)';
+  }
+  if (status) { where += ' AND status = ?'; params.push(status); }
+  if (priority) { where += ' AND priority = ?'; params.push(priority); }
+  if (assigned_to) { where += ' AND assigned_to = ?'; params.push(assigned_to); }
+  if (search) {
+    where += ' AND (title LIKE ? OR objective LIKE ? OR impl_notes LIKE ?)';
+    const term = `%${search}%`;
+    params.push(term, term, term);
+  }
+
+  const countRow = db.prepare(`SELECT COUNT(*) as count FROM tasks ${where}`).get(...params) as { count: number };
+  const total = countRow.count;
+
+  const offset = (page - 1) * page_size;
+  const rows = db.prepare(
+    `SELECT * FROM tasks ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`
+  ).all(...params, page_size, offset) as TaskRow[];
+
+  return { tasks: rows.map(deserialize), total };
 }
 
 export function dbInsertTask(task: Task): void {
   db.prepare(`
     INSERT INTO tasks (id, title, status, priority, assigned_to, branch, base_branch,
       depends_on, skills, relevant_specs, completion_notes, pr_link, worktree,
-      objective, subtasks, impl_notes, status_log, created_at, started_at, completed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      objective, subtasks, impl_notes, status_log, created_at, started_at, completed_at, archived)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     task.id, task.title, task.status, task.priority, task.assigned_to,
     task.branch, task.base_branch,
@@ -76,16 +113,18 @@ export function dbInsertTask(task: Task): void {
     JSON.stringify(task.relevant_specs), task.completion_notes,
     task.pr_link, task.worktree, task.objective, task.subtasks,
     task.impl_notes, JSON.stringify(task.status_log),
-    task.created_at, task.started_at, task.completed_at
+    task.created_at, task.started_at, task.completed_at,
+    task.archived ? 1 : 0
   );
 }
 
 export function dbUpdateTask(id: string, fields: Partial<Task>): void {
   const serialized: Record<string, unknown> = { ...fields };
-  if (fields.depends_on)     serialized.depends_on     = JSON.stringify(fields.depends_on);
-  if (fields.skills)         serialized.skills          = JSON.stringify(fields.skills);
-  if (fields.relevant_specs) serialized.relevant_specs  = JSON.stringify(fields.relevant_specs);
-  if (fields.status_log)     serialized.status_log      = JSON.stringify(fields.status_log);
+  if (fields.depends_on)          serialized.depends_on    = JSON.stringify(fields.depends_on);
+  if (fields.skills)              serialized.skills         = JSON.stringify(fields.skills);
+  if (fields.relevant_specs)      serialized.relevant_specs = JSON.stringify(fields.relevant_specs);
+  if (fields.status_log)          serialized.status_log     = JSON.stringify(fields.status_log);
+  if (fields.archived !== undefined) serialized.archived    = fields.archived ? 1 : 0;
 
   const keys = Object.keys(serialized);
   if (keys.length === 0) return;
